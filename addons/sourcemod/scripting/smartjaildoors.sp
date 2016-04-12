@@ -82,6 +82,7 @@ int g_ghostbutton = INVALID_ENT_REFERENCE;
 bool g_ghostbuttonsave;
 float g_ghostbuttonpos[3];
 int g_oldButtons[MAXPLAYERS + 1];
+bool g_late;
 
 ConVar cv_sjd_buttons_sound_enable;
 ConVar cv_sjd_buttons_sound;
@@ -111,9 +112,11 @@ public APLRes AskPluginLoad2(Handle myself, bool late, char[] error, int err_max
 	CreateNative("SJD_ToggleDoors", Native_SJD_ToggleDoors);
 	CreateNative("SJD_ToggleExDoors", Native_SJD_ToggleExDoors);
 	CreateNative("SJD_IsMapConfigured", Native_SJD_IsMapConfigured);
-	
+
 	RegPluginLibrary("smartjaildoors");
-	
+
+	g_late = late;
+
 	return APLRes_Success;
 }
 
@@ -146,13 +149,16 @@ public void OnPluginStart()
 	
 	cv_sjd_buttons_sound_enable = CreateConVar("sjd_buttons_sound_enable", "1", "Sound switch", _, true, 0.0, true, 1.0);
 	cv_sjd_buttons_sound = CreateConVar("sjd_buttons_sound", BUTTON_USE_SOUND, "Sound file");
-	cv_sjd_buttons_glow = CreateConVar("sjd_buttons_glow", "0", "Glow switch", _, true, 0.0, true, 1.0);
-	cv_sjd_buttons_glow.AddChangeHook(ConVarChanged);
-	cv_sjd_buttons_glow_color = CreateConVar("sjd_buttons_glow_color", BUTTON_GLOW_COLOR, "Glow color");
-	cv_sjd_buttons_glow_color.AddChangeHook(ConVarChanged);
+	if (GetEngineVersion() == Engine_CSGO) {
+		cv_sjd_buttons_glow = CreateConVar("sjd_buttons_glow", "0", "Glow switch", _, true, 0.0, true, 1.0);
+		cv_sjd_buttons_glow.AddChangeHook(ConVarChanged);
+		cv_sjd_buttons_glow_color = CreateConVar("sjd_buttons_glow_color", BUTTON_GLOW_COLOR, "Glow color");
+		cv_sjd_buttons_glow_color.AddChangeHook(ConVarChanged);
+	}
 	cv_sjd_buttons_filter = CreateConVar("sjd_buttons_filter", "0", "If 0 all can use buttons, if 1 only CT can use buttons", _, true, 0.0, true, 1.0);
-	
-	ExecuteButtons(SpawnButtonsOnRoundStart);
+
+	if (g_late)
+		ExecuteButtons(SpawnButtonsOnRoundStart);
 }
 
 public void OnPluginEnd()
@@ -260,10 +266,9 @@ bool ExecuteDoors(DoorHandler handler, any data = 0)
 
 void InputToDoor(const char[] name, const char[] clsname, const char[] input)
 {
-	
-	int doors[128], MaxEntities = GetMaxEntities(), i;
+	int doors[128], MaxEntities = GetMaxEntities(), i = MaxClients + 1;
 	char entclsname[64], entname[64];
-	for (i = MaxClients+1; i < MaxEntities; i++) {
+	for (; i < MaxEntities; i++) {
 		if (IsValidEntity(i)) {
 			GetEntityClassname(i, entclsname, sizeof(entclsname));
 			if (StrEqual(clsname, entclsname)) {
@@ -376,25 +381,17 @@ public void OnMapStart()
 {
 	PrecacheModel("models/kzmod/buttons/standing_button.mdl");
 
-	for (int i=0;i<sizeof(downloadablefiles);i++)
+	for (int i = 0; i < sizeof(downloadablefiles); i++)
 		AddFileToDownloadsTable(downloadablefiles[i]);
 
 	if (!IsSoundPrecached(BUTTON_USE_SOUND))
 		PrecacheSound(BUTTON_USE_SOUND);
-	#if defined DOOR_HOOKS
-	ExecuteDoors(AddDoorHooks);
-	#endif
 }
 
 #if defined DOOR_HOOKS
 public void AddDoorHooks(const char[] name, const char[] clsname)
 {
 	HookDoorAction(name, clsname);
-}
-
-public void OnMapEnd()
-{
-	ExecuteDoors(RemoveDoorHooks);
 }
 
 public void RemoveDoorHooks(const char[] name, const char[] clsname)
@@ -500,7 +497,7 @@ public Action OnPlayerRunCmd(int client, int &f_buttons, int &impulse, float vel
 
 						bool Isbutton;
 						int buttonid;
-						for (int i=1;i<=buttons[0];i++)
+						for (int i = 1; i <= buttons[0]; i++)
 							if (g_buttonindex[buttons[i]] == target) {
 								Isbutton = true;
 								buttonid = buttons[i];
@@ -674,7 +671,7 @@ int SaveButton(float origin[3])
 
 bool SaveButtonHelper(int &buttonid, int[] buttons)
 {
-	for (int i=1;i<=buttons[0];i++)
+	for (int i = 1; i <= buttons[0]; i++)
 		if (buttons[i] == buttonid)
 			return true;
 	return false;
@@ -735,19 +732,25 @@ void SpawnButton(int buttonid)
 
 void CreateButton(int buttonid, const float origin[3])
 {
-	int button = CreateEntityByName("prop_dynamic_glow");
+	int button = -1;
+	if (GetEngineVersion() == Engine_CSGO)
+		button = CreateEntityByName("prop_dynamic_glow");
+	else
+		button = CreateEntityByName("prop_dynamic");
 	DispatchKeyValue(button, "model", "models/kzmod/buttons/standing_button.mdl");
 	DispatchKeyValue(button, "solid", "6");
-	DispatchKeyValue(button, "glowstyle", "0");
-	DispatchKeyValue(button, "glowdist", "32768");
-	if (cv_sjd_buttons_glow.BoolValue) {
-		char color[12];
-		cv_sjd_buttons_glow_color.GetString(color, sizeof(color));
-		DispatchKeyValue(button, "glowcolor", color);
-		DispatchKeyValue(button, "glowenabled", "1");
-	} else {
-		DispatchKeyValue(button, "glowcolor", "255 0 0");
-		DispatchKeyValue(button, "glowenabled", "0");
+	if (GetEngineVersion() == Engine_CSGO) {
+		DispatchKeyValue(button, "glowstyle", "0");
+		DispatchKeyValue(button, "glowdist", "32768");
+		if (cv_sjd_buttons_glow.BoolValue) {
+			char color[12];
+			cv_sjd_buttons_glow_color.GetString(color, sizeof(color));
+			DispatchKeyValue(button, "glowcolor", color);
+			DispatchKeyValue(button, "glowenabled", "1");
+		} else {
+			DispatchKeyValue(button, "glowcolor", "255 0 0");
+			DispatchKeyValue(button, "glowenabled", "0");
+		}
 	}
 	DispatchSpawn(button);
 	TeleportEntity(button, origin, NULL_VECTOR, NULL_VECTOR);
@@ -757,6 +760,10 @@ void CreateButton(int buttonid, const float origin[3])
 public void OnRoundStart(Event event, const char[] name, bool dontBroadcast)
 {
 	ExecuteButtons(SpawnButtonsOnRoundStart);
+	
+	#if defined DOOR_HOOKS
+	ExecuteDoors(AddDoorHooks);
+	#endif
 }
 
 public void OnRoundEnd(Event event, const char[] name, bool dontBroadcast)
@@ -766,6 +773,10 @@ public void OnRoundEnd(Event event, const char[] name, bool dontBroadcast)
 		if (g_SJDMenu2 != null)
 			delete g_SJDMenu2;
 	}
+	
+	#if defined DOOR_HOOKS
+	ExecuteDoors(RemoveDoorHooks);
+	#endif
 }
 
 public void OnPlayerDeath(Event event, const char[] name, bool dontBroadcast)
@@ -1516,7 +1527,7 @@ void DisableLookAt()
 //** Glow button functions **//
 void EnableButtonGlow(int buttonid)
 {
-	if (g_glowedbutton != 0)
+	if (g_glowedbutton != 0 || GetEngineVersion() != Engine_CSGO)
 		return;
 	
 	if (cv_sjd_buttons_glow.BoolValue)
@@ -1528,7 +1539,7 @@ void EnableButtonGlow(int buttonid)
 
 void DisableButtonGlow()
 {
-	if (g_glowedbutton != 0) {
+	if (g_glowedbutton != 0 && GetEngineVersion() == Engine_CSGO) {
 		if (cv_sjd_buttons_glow.BoolValue)
 			SetDefaultGlowColor(g_glowedbutton);
 		else
@@ -1653,7 +1664,7 @@ public Action Command_Handmode(int client, int args)
 			KeyValues kv = new KeyValues("handmode");
 			int MaxEntities = GetMaxEntities();
 			char clsname[64], name[64];
-			for (int i = MaxClients+1; i < MaxEntities; i++)
+			for (int i = MaxClients + 1; i < MaxEntities; i++)
 				if (IsValidEdict(i)) {
 					GetEntityClassname(i, clsname, sizeof(clsname));
 					if (DoorClassValidation(clsname)) {
@@ -1686,7 +1697,7 @@ public Action Command_Handmode(int client, int args)
 			char name[64], clsname[64], namebuffer[64], clsbuffer[64], displayname[64];
 			GetCmdArg(1, name, sizeof(name));
 			int MaxEntities = GetMaxEntities(), amount;
-			for (int i = MaxClients+1; i < MaxEntities; i++)
+			for (int i = MaxClients + 1; i < MaxEntities; i++)
 				if (IsValidEdict(i)) {
 					GetEntityClassname(i, clsbuffer, sizeof(clsbuffer));
 					if (DoorClassValidation(clsbuffer)) {
